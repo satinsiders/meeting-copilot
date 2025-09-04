@@ -52,29 +52,6 @@ stop_program = threading.Event()
 SEND_FLAG = threading.Event()
 
 
-def ensure_file(path):
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("# Live Meeting Transcript\n\n")
-
-
-def append_transcript(text):
-    with open(TRANSCRIPT_PATH, "a", encoding="utf-8") as f:
-        f.write(text.rstrip() + "\n")
-
-
-def read_recent_transcript(seconds=INCLUDE_LAST_SECONDS):
-    # simple: we ignore true timestamps; we just read tail of file
-    # for better recency control, store timestamps alongside lines.
-    try:
-        with open(TRANSCRIPT_PATH, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        # naive tail: last ~200 lines
-        return "".join(lines[-200:])
-    except FileNotFoundError:
-        return ""
-
-
 def new_transcript_path():
     os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
