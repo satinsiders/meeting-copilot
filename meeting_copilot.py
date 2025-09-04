@@ -3,7 +3,6 @@ import os, io, queue, threading, time, sys, tempfile, subprocess
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-import signal
 
 from pynput import keyboard
 from dotenv import load_dotenv
@@ -34,14 +33,12 @@ VOICE = "alloy"                 # try: verse, aria, breeze, etc.
 INCLUDE_LAST_SECONDS = 900      # when sending: ~15 min window
 SYSTEM_PROMPT = """You are a concise, helpful meeting copilot.
 - Read the transcript context.
-- participate helpfully in the meeting as if you were one of the attendees.
-- Decide upon a role (e.g., project manager, engineer, designer, etc.) and respond in character.
-- Assume you have domain expertise.
-- provide valuable insights, suggestions, and action items.
-- be completely objective, neutral, and assessive. no need to be overly polite, apologetic, or self-effacing.
-- bring in relevant knowledge at the professional level.
-- think and explain everything step-by-step and logically, but use casual language as if you are speaking to colleagues.
-- If uncertain, ask 1 clarifying question max.
+- Participate as one of the attendees and respond in character.
+- Speak in natural, conversational language using complete sentences.
+- Avoid lists, bullet points, or numbering.
+- Keep replies brief—one or two sentences.
+- Offer useful insights, suggestions, or action items.
+- If uncertain, ask one clarifying question at most.
 """
 
 # ====== Globals ======
@@ -173,6 +170,7 @@ def llm_respond():
             input=[{ "role":"user", "content":[{"type":"input_text","text": context}] }],
             reasoning={"effort": "low"},      # reduce hidden reasoning spend
             text={"verbosity": "low"},
+            max_output_tokens=80,
         )
         reply = (getattr(resp, "output_text", None) or "").strip()
         if not reply:
@@ -194,21 +192,17 @@ def shutdown(reason="[shutdown]"):
     try:
         if listener is not None:
             listener.stop()
-            if listener != threading.current_thread():
-                listener.join(timeout=1.0)
+            listener.join()
+        sd.stop()
     except Exception:
         pass
-
-signal.signal(signal.SIGINT,  lambda s, f: shutdown("[CTRL-C]"))
-signal.signal(signal.SIGTERM, lambda s, f: shutdown("[SIGTERM]"))
-
 
 def on_press(key):
     try:
         if key == keyboard.Key.enter:
             SEND_FLAG.set()
         elif key == keyboard.Key.esc:
-            shutdown("[ESC]")
+            stop_program.set()
             return False
     except Exception:
         pass
@@ -234,7 +228,7 @@ def main():
     t_stt.start()
 
     # Start keyboard listener for keypress detection
-    listener = keyboard.Listener(on_press=on_press)
+    listener = keyboard.Listener(on_press=on_press, daemon=True)
     listener.start()
 
     try:
@@ -243,8 +237,10 @@ def main():
                 SEND_FLAG.clear()
                 llm_respond()
             time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
     finally:
-        shutdown("[main exit]")
+        shutdown("[exit]")
         t_capture.join(timeout=1.0)
         t_stt.join(timeout=1.0)
         print("Bye.")
