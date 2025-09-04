@@ -163,7 +163,6 @@ def llm_respond():
             input=[{ "role":"user", "content":[{"type":"input_text","text": context}] }],
             reasoning={"effort": "low"},      # reduce hidden reasoning spend
             text={"verbosity": "low"},
-            max_output_tokens=80,
         )
         reply = (getattr(resp, "output_text", None) or "").strip()
         if not reply:
