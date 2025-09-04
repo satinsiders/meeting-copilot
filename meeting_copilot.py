@@ -49,6 +49,8 @@ audio_q = queue.Queue()
 stop_capture = threading.Event()
 stop_program = threading.Event()
 SEND_FLAG = threading.Event()
+
+
 def new_transcript_path():
     os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
