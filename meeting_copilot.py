@@ -22,12 +22,11 @@ TRANSCRIPTS_DIR = "transcripts"
 TRANSCRIPT_PATH = None  # set at startup per run
 
 # ====== Settings ======
-listener = None
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_SECONDS = 6               # rolling dictation chunk length
 MODEL_STT = "gpt-4o-mini-transcribe"
-MODEL_LLM = "gpt-5-mini"
+MODEL_LLM = "gpt-4.1"
 MODEL_TTS = "gpt-4o-mini-tts"
 VOICE = "alloy"                 # try: verse, aria, breeze, etc.
 INCLUDE_LAST_SECONDS = 900      # when sending: ~15 min window
@@ -43,8 +42,6 @@ SYSTEM_PROMPT = """You are a concise, helpful meeting copilot.
 
 # ====== Globals ======
 audio_q = queue.Queue()
-stop_capture = threading.Event()
-stop_program = threading.Event()
 SEND_FLAG = threading.Event()
 
 
@@ -77,28 +74,25 @@ def read_recent_transcript(seconds=INCLUDE_LAST_SECONDS):
 
 def record_stream():
     """Continuously capture mic audio and put CHUNK_SECONDS buffers into audio_q."""
-    while not stop_capture.is_set():
+    while True:
         chunk_frames = []
+
         def callback(indata, frames, t, status):
             if status:
                 print(f"[audio] {status}", file=sys.stderr)
-            # Append the whole frame (copy) as one block
             chunk_frames.append(indata.copy())
 
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='float32', callback=callback):
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="float32", callback=callback):
             start = time.time()
-            while (time.time() - start) < CHUNK_SECONDS and not stop_capture.is_set():
+            while (time.time() - start) < CHUNK_SECONDS:
                 sd.sleep(50)
 
         if not chunk_frames:
             continue
 
-        # Concatenate all captured frames in this chunk
         np_audio = np.concatenate(chunk_frames, axis=0)
-
-        # Write WAV into an in-memory buffer
         buf = io.BytesIO()
-        sf.write(buf, np_audio, SAMPLE_RATE, format='WAV', subtype='PCM_16')
+        sf.write(buf, np_audio, SAMPLE_RATE, format="WAV", subtype="PCM_16")
         buf.seek(0)
 
         audio_q.put(buf)
@@ -106,13 +100,12 @@ def record_stream():
 
 def stt_worker():
     """Read audio chunks, transcribe, and append to transcript."""
-    while not stop_program.is_set():
+    while True:
         try:
             buf = audio_q.get(timeout=0.5)
         except queue.Empty:
             continue
         try:
-            # OpenAI Whisper transcription
             tr = client.audio.transcriptions.create(
                 model=MODEL_STT,
                 file=("chunk.wav", buf, "audio/wav"),
@@ -185,65 +178,43 @@ def llm_respond():
         print(f"[LLM ERROR] {e}", file=sys.stderr)
 
 
-def shutdown(reason="[shutdown]"):
-    print(f"\n{reason} Cleaning up...")
-    stop_program.set()
-    stop_capture.set()
-    try:
-        if listener is not None:
-            listener.stop()
-            listener.join()
-        sd.stop()
-    except Exception:
-        pass
-
 def on_press(key):
     try:
         if key == keyboard.Key.enter:
             SEND_FLAG.set()
-        elif key == keyboard.Key.esc:
-            stop_program.set()
-            return False
     except Exception:
         pass
 
 
 def main():
-    global listener, TRANSCRIPT_PATH
-    
+    global TRANSCRIPT_PATH
+
     print("Live Meeting Assistant (local, in-person)")
     print("• Always-on dictation → transcript.md")
     print("• Press ENTER to make the assistant speak.")
-    print("• Press ESC or Ctrl-C to quit.\n")
+    print("• Press Ctrl-C to quit.\n")
 
-    # Prepare transcript file
     TRANSCRIPT_PATH = new_transcript_path()
     ensure_file(TRANSCRIPT_PATH)
     print(f"[init] Writing transcript to: {TRANSCRIPT_PATH}")
 
-    # Start capture + STT threads
     t_capture = threading.Thread(target=record_stream, daemon=True)
     t_stt = threading.Thread(target=stt_worker, daemon=True)
     t_capture.start()
     t_stt.start()
 
-    # Start keyboard listener for keypress detection
-    listener = keyboard.Listener(on_press=on_press, daemon=True)
-    listener.start()
+    with keyboard.Listener(on_press=on_press) as _:
+        try:
+            while True:
+                if SEND_FLAG.is_set():
+                    SEND_FLAG.clear()
+                    llm_respond()
+                time.sleep(0.05)
+        except KeyboardInterrupt:
+            print("\n[exit] Ctrl-C detected. Cleaning up...")
 
-    try:
-        while not stop_program.is_set():
-            if SEND_FLAG.is_set():
-                SEND_FLAG.clear()
-                llm_respond()
-            time.sleep(0.05)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        shutdown("[exit]")
-        t_capture.join(timeout=1.0)
-        t_stt.join(timeout=1.0)
-        print("Bye.")
+    sd.stop()
+    print("Bye.")
 
 
 if __name__ == "__main__":
