@@ -171,9 +171,9 @@ def llm_respond():
         resp = client.responses.create(
             model="gpt-5-mini",
             instructions=SYSTEM_PROMPT,
-            input=[{ "role":"user", "content":[{"type":"input_text","text": SYSTEM_PROMPT}] }],
-            reasoning={"effort":"low"},      # reduce hidden reasoning spend
-            text={"verbosity":"low"},
+            input=[{ "role":"user", "content":[{"type":"input_text","text": context}] }],
+            reasoning={"effort": "low"},      # reduce hidden reasoning spend
+            text={"verbosity": "low"},
         )
         reply = (getattr(resp, "output_text", None) or "").strip()
         if not reply:
