@@ -27,9 +27,8 @@ listener = None
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_SECONDS = 6               # rolling dictation chunk length
-TRANSCRIPT_PATH = "transcript.md"
 MODEL_STT = "gpt-4o-mini-transcribe"
-MODEL_LLM = "gpt-5-mini"       
+MODEL_LLM = "gpt-5-mini"
 MODEL_TTS = "gpt-4o-mini-tts"
 VOICE = "alloy"                 # try: verse, aria, breeze, etc.
 INCLUDE_LAST_SECONDS = 900      # when sending: ~15 min window
@@ -195,6 +194,8 @@ def shutdown(reason="[shutdown]"):
     try:
         if listener is not None:
             listener.stop()
+            if listener != threading.current_thread():
+                listener.join(timeout=1.0)
     except Exception:
         pass
 
@@ -231,6 +232,10 @@ def main():
     t_stt = threading.Thread(target=stt_worker, daemon=True)
     t_capture.start()
     t_stt.start()
+
+    # Start keyboard listener for keypress detection
+    listener = keyboard.Listener(on_press=on_press)
+    listener.start()
 
     try:
         while not stop_program.is_set():
